@@ -256,12 +256,17 @@ taxshield redact "Luna Wang 25.pdf" "W2_photo.jpg" "1099-DIV.png"
 # 目录（自动处理所有 PDF 和图片，忽略其他文件）
 taxshield redact ./tax_documents/
 
+# 预览模式（只显示检测到的 PII，不执行脱敏）
+taxshield redact ./tax_documents/ --preview
+
 # 指定输出目录
 taxshield redact ./tax_documents/ --output ./output/
 
 # 版本信息
 taxshield --version
 ```
+
+**`--preview` 参数：** 只检测和显示 PII，不修改任何文件。用户可以在脱敏前确认检测结果是否正确。
 
 **输出目录逻辑：**
 - 输入是目录：输出到该目录下的 `redacted/` 子目录
