@@ -1,0 +1,15 @@
+README.md
+setup.py
+taxshield/__init__.py
+taxshield/cli.py
+taxshield/map_writer.py
+taxshield/pdf_processor.py
+taxshield/pii_detector.py
+taxshield/redactor.py
+taxshield/tokenizer.py
+taxshield.egg-info/PKG-INFO
+taxshield.egg-info/SOURCES.txt
+taxshield.egg-info/dependency_links.txt
+taxshield.egg-info/entry_points.txt
+taxshield.egg-info/requires.txt
+taxshield.egg-info/top_level.txt
