@@ -142,8 +142,11 @@ def redact_pdf(
     for match in all_matches_flat:
         if match.pii_type == "name" and len(match.original_text) > 2:
             known_names.add(match.original_text)
-        elif match.pii_type == "address" and len(match.original_text) > 3:
-            known_addresses.add(match.original_text)
+        elif match.pii_type == "address" and len(match.original_text) > 4:
+            # Skip state abbreviations and short strings for global search
+            text = match.original_text.strip()
+            if not (len(text) == 2 and text.isalpha() and text.isupper()):
+                known_addresses.add(text)
 
     # Second pass: find known PII texts on ALL pages (catch repeats on worksheets etc.)
     for page_num in range(len(doc)):

@@ -146,13 +146,44 @@ def detect_pii_on_page(
     page: fitz.Page,
     page_num: int,
     token_map: TokenMap,
+    form_type: str = "unknown",
+    page_in_form: int = 0,
 ) -> list[PIIMatch]:
-    """Detect all PII on a single PDF page using regex + font + position."""
+    """Detect all PII on a single PDF page using regex + font + position.
+
+    Args:
+        page: The PDF page.
+        page_num: 0-based page number in the document.
+        token_map: Token map for name tokenization.
+        form_type: Detected form type (e.g., "1040", "w2", "8615").
+        page_in_form: Page number within this specific form (0=first page).
+    """
+    from .tax_form_fields import (
+        detect_1040_page1_pii,
+        detect_1040_page2_pii,
+        detect_form_8615_pii,
+    )
+
     matches = []
     seen = set()
 
     spans = extract_text_spans(page)
     label_spans = [s for s in spans if not s["is_user_data"]]
+
+    # --- Form-specific detection (names, split SSNs, addresses) ---
+    page_text_lower = page.get_text().lower()
+
+    if "form 1040" in page_text_lower or "u.s. individual income tax return" in page_text_lower:
+        if "your first name" in page_text_lower:
+            matches.extend(detect_1040_page1_pii(page, page_num, spans, token_map))
+        if "preparer" in page_text_lower and "sign here" in page_text_lower:
+            matches.extend(detect_1040_page2_pii(page, page_num, spans, token_map))
+    if "form 8615" in page_text_lower:
+        matches.extend(detect_form_8615_pii(page, page_num, spans, token_map))
+
+    # Track what the form-specific detection already found
+    for m in matches:
+        seen.add((m.pii_type, m.original_text, page_num, round(fitz.Rect(m.rect).y0)))
 
     for idx, span in enumerate(spans):
         text = span["text"]
@@ -289,6 +320,9 @@ def detect_pii_on_page(
                         confidence="medium",
                     ))
             elif pii_type == "address":
+                # Preserve state abbreviation (2 uppercase letters)
+                if len(text) == 2 and text.isalpha() and text.isupper():
+                    continue
                 replacement = _redact_address(text)
                 key = ("address", text, page_num, round(rect.y0))
                 if key not in seen:
@@ -314,6 +348,18 @@ def detect_pii_on_page(
                         rect=tuple(rect),
                         confidence="high",
                     ))
+
+    # Final filter: never redact 2-letter state abbreviations
+    US_STATES = {
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+        "DC",
+    }
+    matches = [m for m in matches
+               if not (m.pii_type == "address" and m.original_text.strip() in US_STATES)]
 
     return matches
 
