@@ -6,7 +6,6 @@ from pathlib import Path
 from .pii_detector import PIIMatch
 from .pdf_processor import (
     detect_pii_on_page,
-    detect_names_by_position,
     apply_redactions_to_pdf,
     identify_form_type,
 )
@@ -131,16 +130,7 @@ def redact_pdf(
 
     for page_num in range(len(doc)):
         page = doc[page_num]
-        page_matches = []
-
-        # Regex-based detection (SSN, EIN, phone)
-        regex_matches = detect_pii_on_page(page, page_num, token_map)
-        page_matches.extend(regex_matches)
-
-        # Position-based detection (names, addresses)
-        name_matches = detect_names_by_position(page, page_num, token_map, form_type)
-        page_matches.extend(name_matches)
-
+        page_matches = detect_pii_on_page(page, page_num, token_map)
         all_matches[page_num] = page_matches
         all_matches_flat.extend(page_matches)
 
