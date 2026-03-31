@@ -391,7 +391,10 @@ def apply_redactions_to_pdf(
                 fill=(1, 1, 1),
                 text_color=(0, 0, 0),
             )
-        page.apply_redactions()
+        page.apply_redactions(
+            images=fitz.PDF_REDACT_IMAGE_NONE,    # preserve images
+            graphics=fitz.PDF_REDACT_IMAGE_NONE,   # preserve lines/borders
+        )
 
     # Clean metadata
     doc.scrub()
