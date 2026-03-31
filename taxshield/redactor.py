@@ -110,6 +110,7 @@ def redact_pdf(
     output_path: Path,
     token_map: TokenMap,
     preview: bool = False,
+    dpi: int = 150,
 ) -> list[PIIMatch]:
     """Redact a single PDF file.
 
@@ -189,7 +190,7 @@ def redact_pdf(
     doc.close()
 
     if not preview:
-        apply_redactions_to_pdf(str(input_path), str(output_path), all_matches)
+        apply_redactions_to_pdf(str(input_path), str(output_path), all_matches, dpi=dpi)
 
     return all_matches_flat
 
@@ -199,6 +200,7 @@ def redact_image(
     output_path: Path,
     token_map: TokenMap,
     preview: bool = False,
+    dpi: int = 150,
 ) -> list[PIIMatch]:
     """Redact an image file (JPG/PNG).
 
@@ -231,7 +233,7 @@ def redact_image(
         img.close()
 
         # Now process the temporary PDF
-        matches = redact_pdf(temp_pdf, output_path, token_map, preview)
+        matches = redact_pdf(temp_pdf, output_path, token_map, preview, dpi=dpi)
 
         # Clean up temp file
         if temp_pdf.exists():
@@ -248,6 +250,7 @@ def run_redaction(
     input_paths: list[str],
     output_dir: str | None = None,
     preview: bool = False,
+    dpi: int = 150,
 ) -> dict:
     """Main entry point for redaction.
 
@@ -279,9 +282,9 @@ def run_redaction(
         output_path = out_dir / output_name
 
         if file_type == "pdf":
-            matches = redact_pdf(file_path, output_path, token_map, preview)
+            matches = redact_pdf(file_path, output_path, token_map, preview, dpi=dpi)
         elif file_type == "image":
-            matches = redact_image(file_path, output_path, token_map, preview)
+            matches = redact_image(file_path, output_path, token_map, preview, dpi=dpi)
         else:
             continue
 

@@ -16,7 +16,8 @@ def main():
 @click.argument("paths", nargs=-1, required=True)
 @click.option("--output", "-o", default=None, help="Output directory (default: <input>/redacted/)")
 @click.option("--preview", "-p", is_flag=True, default=False, help="Preview detected PII without redacting")
-def redact(paths, output, preview):
+@click.option("--dpi", default=150, type=int, help="Output resolution (default: 150, higher = clearer but larger file)")
+def redact(paths, output, preview, dpi):
     """Redact PII from tax documents.
 
     PATHS can be one or more files, or a directory.
@@ -28,7 +29,7 @@ def redact(paths, output, preview):
         click.echo("Redacting PII from tax documents...\n")
 
     try:
-        result = run_redaction(list(paths), output, preview)
+        result = run_redaction(list(paths), output, preview, dpi=dpi)
     except FileNotFoundError as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)

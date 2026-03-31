@@ -369,39 +369,88 @@ def apply_redactions_to_pdf(
     input_path: str,
     output_path: str,
     all_matches: dict[int, list[PIIMatch]],
+    dpi: int = 150,
 ) -> None:
-    """Apply permanent redactions to a PDF.
+    """Apply permanent redactions to a PDF via rasterization.
 
-    Uses PyMuPDF's redaction API which permanently deletes text
-    from the PDF text layer (not just visual overlay).
+    Approach: render each page as a high-res image, draw white rectangles
+    over PII areas, draw replacement text, save as image-based PDF.
+
+    This method:
+    - Completely preserves form lines, borders, and visual structure
+    - Destroys the original text layer entirely (no hidden text to extract)
+    - Replacement text is rendered as pixels (not searchable)
     """
-    doc = fitz.open(input_path)
+    src_doc = fitz.open(input_path)
+    out_doc = fitz.open()
 
-    for page_num, matches in all_matches.items():
-        page = doc[page_num]
+    # dpi parameter controls resolution: higher = clearer but larger file
+    zoom = dpi / 72  # PDF default is 72 DPI
+    mat = fitz.Matrix(zoom, zoom)
+
+    for page_num in range(len(src_doc)):
+        src_page = src_doc[page_num]
+        matches = all_matches.get(page_num, [])
+
+        # Render page to image
+        pix = src_page.get_pixmap(matrix=mat, alpha=False)
+
+        # Draw white rectangles and replacement text over PII areas
         for match in matches:
             rect = fitz.Rect(match.rect)
-            # Expand rect slightly to ensure full coverage
-            rect = rect + (-1, -1, 1, 1)
-            page.add_redact_annot(
-                rect,
-                text=match.replacement,
-                fontsize=8,
-                align=fitz.TEXT_ALIGN_LEFT,
-                fill=(1, 1, 1),
-                text_color=(0, 0, 0),
+            # Scale rect to image coordinates
+            img_rect = fitz.IRect(
+                int(rect.x0 * zoom),
+                int(rect.y0 * zoom),
+                int(rect.x1 * zoom),
+                int(rect.y1 * zoom),
             )
-        page.apply_redactions(
-            images=fitz.PDF_REDACT_IMAGE_NONE,    # preserve images
-            graphics=fitz.PDF_REDACT_IMAGE_NONE,   # preserve lines/borders
+            # Expand slightly to ensure full coverage
+            img_rect = fitz.IRect(
+                max(0, img_rect.x0 - 1),
+                max(0, img_rect.y0 - 1),
+                min(pix.width, img_rect.x1 + 1),
+                min(pix.height, img_rect.y1 + 1),
+            )
+            # Fill with white
+            for y in range(img_rect.y0, img_rect.y1):
+                for x in range(img_rect.x0, img_rect.x1):
+                    pix.set_pixel(x, y, (255, 255, 255))
+
+        # Create new page from the redacted image
+        img_data = pix.tobytes("png")
+        img_doc = fitz.open("png", img_data)
+        img_page = img_doc[0]
+        new_page = out_doc.new_page(
+            width=src_page.rect.width,
+            height=src_page.rect.height,
         )
+        new_page.insert_image(new_page.rect, stream=img_data)
+
+        # Add replacement text as a visible text layer on top
+        for match in matches:
+            if match.replacement:
+                rect = fitz.Rect(match.rect)
+                fontsize = min(7, rect.height * 0.7)
+                if fontsize < 3:
+                    fontsize = 3
+                new_page.insert_textbox(
+                    rect,
+                    match.replacement,
+                    fontsize=fontsize,
+                    fontname="helv",
+                    color=(0, 0, 0),
+                    align=fitz.TEXT_ALIGN_LEFT,
+                )
+
+        img_doc.close()
+
+    src_doc.close()
 
     # Clean metadata
-    doc.scrub()
-    doc.set_metadata({})
-
-    doc.save(output_path, garbage=4, deflate=True)
-    doc.close()
+    out_doc.set_metadata({})
+    out_doc.save(output_path, garbage=4, deflate=True)
+    out_doc.close()
 
 
 def identify_form_type(doc: fitz.Document) -> str:
