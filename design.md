@@ -258,6 +258,7 @@ taxshield redact ./tax_documents/
 
 # 预览模式（只显示检测到的 PII，不执行脱敏）
 taxshield redact ./tax_documents/ --preview
+taxshield redact ./tax_documents/ -p
 
 # 指定输出目录
 taxshield redact ./tax_documents/ --output ./output/
