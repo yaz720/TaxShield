@@ -244,27 +244,31 @@ TaxShield/
 
 ### 5.4 命令行接口
 
-```bash
-# 脱敏单个文件（自动判断 PDF 还是图片）
-taxshield redact "Luna Wang 25.pdf"
-taxshield redact "W2_photo.jpg"
+只有一个命令 `redact`：
 
-# 脱敏整个目录（自动处理所有 PDF 和图片，忽略其他文件）
+```bash
+# 单个文件
+taxshield redact "Luna Wang 25.pdf"
+
+# 多个文件
+taxshield redact "Luna Wang 25.pdf" "W2_photo.jpg" "1099-DIV.png"
+
+# 目录（自动处理所有 PDF 和图片，忽略其他文件）
 taxshield redact ./tax_documents/
 
-# 指定输出目录（默认为输入路径下的 redacted/）
+# 指定输出目录
 taxshield redact ./tax_documents/ --output ./output/
-
-# 预览检测到的 PII（不执行脱敏，只显示检测结果）
-taxshield scan ./tax_documents/
 
 # 版本信息
 taxshield --version
 ```
 
-**文件类型自动判断：** 程序通过文件头（magic bytes）自动识别文件类型，不依赖后缀名。PDF 文件头为 `%PDF`，JPEG 为 `FF D8 FF`，PNG 为 `89 50 4E 47`。后缀名作为 fallback。目录模式下自动处理所有识别为 PDF 或图片的文件，忽略其他文件。
+**输出目录逻辑：**
+- 输入是目录：输出到该目录下的 `redacted/` 子目录
+- 输入是文件（一个或多个）：输出到这些文件的父目录下的 `redacted/` 子目录
+- 输入文件分散在不同目录：报错，要求使用 `--output` 指定输出目录
 
-`scan` 命令让用户在脱敏前预览会检测到哪些 PII，增加透明度和信任。
+**文件类型自动判断：** 程序通过文件头（magic bytes）自动识别文件类型，不依赖后缀名。PDF 文件头为 `%PDF`，JPEG 为 `FF D8 FF`，PNG 为 `89 50 4E 47`。后缀名作为 fallback。目录模式下自动处理所有识别为 PDF 或图片的文件，忽略其他文件。
 
 ---
 
