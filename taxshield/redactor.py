@@ -128,11 +128,63 @@ def redact_pdf(
     all_matches: dict[int, list[PIIMatch]] = {}
     all_matches_flat: list[PIIMatch] = []
 
+    # First pass: detect PII using labels and regex
     for page_num in range(len(doc)):
         page = doc[page_num]
         page_matches = detect_pii_on_page(page, page_num, token_map)
         all_matches[page_num] = page_matches
         all_matches_flat.extend(page_matches)
+
+    # Collect all known PII texts for global search
+    known_names = set()
+    known_addresses = set()
+    for match in all_matches_flat:
+        if match.pii_type == "name" and len(match.original_text) > 2:
+            known_names.add(match.original_text)
+        elif match.pii_type == "address" and len(match.original_text) > 3:
+            known_addresses.add(match.original_text)
+
+    # Second pass: find known PII texts on ALL pages (catch repeats on worksheets etc.)
+    for page_num in range(len(doc)):
+        page = doc[page_num]
+        existing_rects = {tuple(round(x, 1) for x in m.rect) for m in all_matches.get(page_num, [])}
+
+        for name_text in known_names:
+            rects = page.search_for(name_text, quads=False)
+            for r in rects:
+                rect_key = tuple(round(x, 1) for x in r)
+                if rect_key not in existing_rects:
+                    existing_rects.add(rect_key)
+                    token = token_map.lookup_token(name_text)
+                    replacement = token if token else "X" * len(name_text)
+                    new_match = PIIMatch(
+                        pii_type="name",
+                        original_text=name_text,
+                        replacement=replacement,
+                        page_num=page_num,
+                        rect=tuple(r),
+                        confidence="medium",
+                    )
+                    all_matches.setdefault(page_num, []).append(new_match)
+                    all_matches_flat.append(new_match)
+
+        for addr_text in known_addresses:
+            rects = page.search_for(addr_text, quads=False)
+            for r in rects:
+                rect_key = tuple(round(x, 1) for x in r)
+                if rect_key not in existing_rects:
+                    existing_rects.add(rect_key)
+                    from .pdf_processor import _redact_address
+                    new_match = PIIMatch(
+                        pii_type="address",
+                        original_text=addr_text,
+                        replacement=_redact_address(addr_text),
+                        page_num=page_num,
+                        rect=tuple(r),
+                        confidence="medium",
+                    )
+                    all_matches.setdefault(page_num, []).append(new_match)
+                    all_matches_flat.append(new_match)
 
     doc.close()
 

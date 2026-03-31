@@ -19,20 +19,40 @@ PHONE_STRICT_PATTERN = re.compile(
     r'|\d{3}[.-]\d{3}[.-]\d{4}'
 )
 
-# Known form labels on 1040 page 1 that identify nearby PII fields
+# Known form labels that identify nearby PII fields
+# (label_substring, pii_type, token_role)
 LABEL_TO_PII = {
-    # (label_text, pii_type, token_role)
     "your first name": ("name", "Taxpayer"),
-    "last name": ("name", None),  # continuation of taxpayer name
+    "last name": ("name", None),
     "spouse's first name": ("name", "Spouse"),
     "home address": ("address", None),
     "city, town": ("address", None),
     "parent's name": ("name", "Parent"),
     "employer's name": ("name", "Employer"),
-    "employee's name": ("name", None),  # same as taxpayer
+    "employee's name": ("name", None),
     "preparer's name": ("preparer", None),
+    "preparer's signature": ("preparer", None),
     "firm's name": ("preparer", None),
     "firm's address": ("preparer", None),
+    "firm's ein": ("preparer", None),
+    "phone no": ("preparer", None),
+    "email address": ("preparer", None),
+    "ptin": ("preparer", None),
+}
+
+# Date pattern for birth dates: MM/DD/YYYY or MM-DD-YYYY
+DATE_PATTERN = re.compile(r'(\d{1,2})[/\-](\d{1,2})[/\-](\d{4})')
+
+# Labels near which dates should be treated as birth dates (partial redact)
+BIRTH_DATE_LABELS = {
+    "date of birth", "born before", "born", "dob",
+    "birth date", "birthdate",
+}
+
+# Labels near which dates are transaction dates (preserve as-is)
+TRANSACTION_DATE_LABELS = {
+    "date acquired", "date sold", "date disposed",
+    "date of death", "created", "rev ",
 }
 
 # Fonts used for user-entered data in TurboTax PDFs
@@ -190,11 +210,54 @@ def detect_pii_on_page(
                         confidence="high",
                     ))
 
+        # --- Date detection: birth dates get partial redaction ---
+        if span["is_user_data"]:
+            for date_match in DATE_PATTERN.finditer(text):
+                date_text = date_match.group()
+                # Skip if this is part of an SSN (SSN: XXX-XX-XXXX)
+                if SSN_PATTERN.search(text):
+                    continue
+                # Validate date: month 1-12, day 1-31
+                month_val = int(date_match.group(1))
+                day_val = int(date_match.group(2))
+                if month_val < 1 or month_val > 12 or day_val < 1 or day_val > 31:
+                    continue
+                # Check if this date is near a birth-date label
+                is_birth_date = _is_near_label_set(
+                    label_spans, rect, BIRTH_DATE_LABELS
+                )
+                # Check if it's a transaction date (preserve)
+                is_transaction_date = _is_near_label_set(
+                    label_spans, rect, TRANSACTION_DATE_LABELS
+                )
+
+                if is_birth_date and not is_transaction_date:
+                    month = date_match.group(1)
+                    year = date_match.group(3)
+                    sep = "/" if "/" in date_text else "-"
+                    replacement = f"{month}{sep}XX{sep}{year}"
+                    key = ("birth_date", date_text, page_num)
+                    if key not in seen:
+                        seen.add(key)
+                        for r in page.search_for(date_text, quads=False):
+                            matches.append(PIIMatch(
+                                pii_type="birth_date",
+                                original_text=date_text,
+                                replacement=replacement,
+                                page_num=page_num,
+                                rect=tuple(r),
+                                confidence="high",
+                            ))
+
         # --- Font + Position based: names, addresses, preparer info ---
         if span["is_user_data"] and not _is_numeric_or_amount(text):
             label = _find_label_context(spans, idx, label_spans)
             if label is None:
-                continue
+                # Also check if this span is in the preparer area (y > 700 on 1040 page 2)
+                if rect.y0 > 700 and _is_in_preparer_area(label_spans, rect):
+                    label = "preparer's name"  # treat as preparer info
+                else:
+                    continue
 
             pii_type, token_role = LABEL_TO_PII[label]
 
@@ -212,13 +275,8 @@ def detect_pii_on_page(
                         confidence="high",
                     ))
             elif pii_type == "name" and token_role is None:
-                # Last name or employee name - check if we have an existing token
                 existing = token_map.lookup_token(text)
-                if existing:
-                    replacement = existing
-                else:
-                    # This might be a last name; try combining with previous name
-                    replacement = "X" * len(text)
+                replacement = existing if existing else "X" * len(text)
                 key = ("name", text, page_num, round(rect.y0))
                 if key not in seen:
                     seen.add(key)
@@ -258,6 +316,34 @@ def detect_pii_on_page(
                     ))
 
     return matches
+
+
+def _is_near_label_set(
+    label_spans: list[dict],
+    target_rect: fitz.Rect,
+    label_keywords: set[str],
+) -> bool:
+    """Check if a target rect is near any label containing the given keywords."""
+    for label in label_spans:
+        y_diff = abs(target_rect.y0 - label["rect"].y0)
+        if y_diff > 30:
+            continue
+        label_text = label["text"].lower()
+        for keyword in label_keywords:
+            if keyword in label_text:
+                return True
+    return False
+
+
+def _is_in_preparer_area(label_spans: list[dict], target_rect: fitz.Rect) -> bool:
+    """Check if a rect is in the Paid Preparer area of the form."""
+    for label in label_spans:
+        label_text = label["text"].lower()
+        if ("preparer" in label_text or "firm" in label_text or "ptin" in label_text):
+            y_diff = abs(target_rect.y0 - label["rect"].y0)
+            if y_diff < 20:
+                return True
+    return False
 
 
 def _redact_address(address: str) -> str:
