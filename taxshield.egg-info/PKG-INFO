@@ -1,7 +1,0 @@
-Metadata-Version: 2.1
-Name: taxshield
-Version: 0.1.0
-Summary: Tax document PII redaction tool
-Requires-Python: >=3.10
-Requires-Dist: PyMuPDF>=1.24.0
-Requires-Dist: click>=8.0
