@@ -64,10 +64,24 @@ def _is_user_data_font(font_name: str) -> bool:
     return any(uf in font_name for uf in USER_DATA_FONTS)
 
 
+# Words that look like user data (Courier font) but are actually form field values
+# that should NOT be treated as real PII names
+FORM_VALUE_WORDS = {
+    "taxpayer", "spouse", "self-prepared", "self prepared",
+    "student", "retired", "homemaker", "unemployed",
+    "n/a", "na", "none", "various", "same", "same as above",
+}
+
+
 def _is_numeric_or_amount(text: str) -> bool:
     """Check if text is a number or dollar amount (should be preserved)."""
     cleaned = text.replace(",", "").replace(".", "").replace("$", "").replace(" ", "")
     return cleaned.isdigit() or cleaned == "" or text in {"X", "x"}
+
+
+def _is_form_value_word(text: str) -> bool:
+    """Check if text is a common form field value, not a real name."""
+    return text.strip().lower() in FORM_VALUE_WORDS
 
 
 def extract_text_spans(page: fitz.Page) -> list[dict]:
@@ -281,7 +295,7 @@ def detect_pii_on_page(
                             ))
 
         # --- Font + Position based: names, addresses, preparer info ---
-        if span["is_user_data"] and not _is_numeric_or_amount(text):
+        if span["is_user_data"] and not _is_numeric_or_amount(text) and not _is_form_value_word(text):
             label = _find_label_context(spans, idx, label_spans)
             if label is None:
                 # Also check if this span is in the preparer area (y > 700 on 1040 page 2)
@@ -473,20 +487,20 @@ def apply_redactions_to_pdf(
         )
         new_page.insert_image(new_page.rect, stream=img_data)
 
-        # Add replacement text as a visible text layer on top
+        # Add replacement text on top of the image
         for match in matches:
             if match.replacement:
                 rect = fitz.Rect(match.rect)
-                fontsize = min(7, rect.height * 0.7)
-                if fontsize < 3:
-                    fontsize = 3
-                new_page.insert_textbox(
-                    rect,
-                    match.replacement,
+                # Font size: match original field height
+                fontsize = max(6, min(10, rect.height * 0.75))
+                # insert_text uses bottom-left as anchor point
+                # Place text at the bottom of the original field rect
+                new_page.insert_text(
+                    point=(rect.x0, rect.y1 - 1),
+                    text=match.replacement,
                     fontsize=fontsize,
                     fontname="helv",
-                    color=(0, 0, 0),
-                    align=fitz.TEXT_ALIGN_LEFT,
+                    color=(1, 0, 0),  # red text so redacted fields are clearly visible
                 )
 
         img_doc.close()

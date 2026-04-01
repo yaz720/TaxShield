@@ -149,15 +149,45 @@ def redact_pdf(
                 known_addresses.add(text)
 
     # Second pass: find known PII texts on ALL pages (catch repeats on worksheets etc.)
+    # Only match text in user-data font (Courier), not form labels (Helvetica)
+    from .pdf_processor import extract_text_spans
+
     for page_num in range(len(doc)):
         page = doc[page_num]
         existing_rects = {tuple(round(x, 1) for x in m.rect) for m in all_matches.get(page_num, [])}
 
+        # Build a set of user-data text on this page for verification
+        page_spans = extract_text_spans(page)
+        user_data_texts = set()
+        user_data_rects = []
+        for s in page_spans:
+            if s["is_user_data"]:
+                user_data_texts.add(s["text"].strip())
+                user_data_rects.append((s["text"].strip(), s["rect"]))
+
         for name_text in known_names:
+            # Only search if this name appears in user-data font on this page
+            found_in_user_data = any(
+                name_text in udt or udt in name_text
+                for udt in user_data_texts
+            )
+            if not found_in_user_data:
+                continue
+
             rects = page.search_for(name_text, quads=False)
             for r in rects:
                 rect_key = tuple(round(x, 1) for x in r)
                 if rect_key not in existing_rects:
+                    # Verify this rect overlaps with a user-data span
+                    r_rect = fitz.Rect(r)
+                    is_user_data = False
+                    for udt_text, udt_rect in user_data_rects:
+                        if r_rect.intersects(udt_rect) and (name_text in udt_text or udt_text in name_text):
+                            is_user_data = True
+                            break
+                    if not is_user_data:
+                        continue
+
                     existing_rects.add(rect_key)
                     token = token_map.lookup_token(name_text)
                     replacement = token if token else "X" * len(name_text)
@@ -173,10 +203,26 @@ def redact_pdf(
                     all_matches_flat.append(new_match)
 
         for addr_text in known_addresses:
+            found_in_user_data = any(
+                addr_text in udt or udt in addr_text
+                for udt in user_data_texts
+            )
+            if not found_in_user_data:
+                continue
+
             rects = page.search_for(addr_text, quads=False)
             for r in rects:
                 rect_key = tuple(round(x, 1) for x in r)
                 if rect_key not in existing_rects:
+                    r_rect = fitz.Rect(r)
+                    is_user_data = False
+                    for udt_text, udt_rect in user_data_rects:
+                        if r_rect.intersects(udt_rect) and (addr_text in udt_text or udt_text in addr_text):
+                            is_user_data = True
+                            break
+                    if not is_user_data:
+                        continue
+
                     existing_rects.add(rect_key)
                     from .pdf_processor import _redact_address
                     new_match = PIIMatch(
